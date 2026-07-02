@@ -1,0 +1,1747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IMS — Ops Command Planner</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2312161C'/%3E%3Crect x='4' y='4' width='56' height='56' rx='10' fill='none' stroke='%23E8A33D' stroke-width='2'/%3E%3Ctext x='32' y='42' font-family='Arial,sans-serif' font-size='24' font-weight='700' fill='%23E8A33D' text-anchor='middle'%3EOC%3C/text%3E%3C/svg%3E" />
+<style>
+  html, body { margin: 0; padding: 0; background: #12161C; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+</head>
+<body>
+<div id="root">
+  <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#8B94A3;font-family:sans-serif;font-size:13px;">
+    Loading Ops Command…
+  </div>
+</div>
+
+<script type="text/babel" data-presets="react">
+
+const { useState, useMemo, useRef, useEffect } = React;
+
+/* ---------------------------------------------------------------
+   ICONS (hand-rolled, replaces lucide-react for standalone use)
+--------------------------------------------------------------- */
+const ICON_PATHS = {
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  check: "M4 4h16v16H4z|M8.5 12.5l2.5 2.5 5-5",
+  folder: "M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z",
+  users: "M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z|M2 20c0-3.3 2.7-6 6-6s6 2.7 6 6|M16 8.5A2.75 2.75 0 1 0 16 3|M18.5 14c2.2.6 3.5 2.3 3.5 4.5",
+  calendar: "M4 5h16v15H4z|M4 9h16|M8 3v4|M16 3v4",
+  chart: "M4 20V10|M11 20V4|M18 20v-7",
+  usercog: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z|M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6|M18 9v1.2|M18 15.8V17|M14.5 12h1.2|M20.3 12h1.2|M15.4 9.1l.8.9|M20.8 15l.8.9|M20.8 9.1l-.8.9|M15.4 15l-.8.9",
+  plus: "M12 5v14|M5 12h14",
+  x: "M6 6l12 12|M18 6L6 18",
+  chevleft: "M15 5l-7 7 7 7",
+  chevright: "M9 5l7 7-7 7",
+  trash: "M4 7h16|M9 7V4h6v3|M6 7l1 13h10l1-13",
+  pencil: "M3 21l3.5-1 11-11-2.5-2.5-11 11z|M14 6l2.5 2.5",
+  building: "M5 21V4h9v17|M14 21v-9h5v9|M8 8h2|M8 12h2|M8 16h2",
+  flag: "M5 21V4|M5 4h13l-2.5 4L18 12H5",
+  link: "M9 15l6-6|M8 12l-2.5 2.5a3 3 0 0 0 4.2 4.2L12 16.5|M16 12l2.5-2.5a3 3 0 0 0-4.2-4.2L12 7.5",
+  dot: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+  checkcircle: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z|M8.5 12.3l2.3 2.3 4.7-4.9",
+};
+function Icon({ name, size = 16, color = "currentColor", style }) {
+  const spec = ICON_PATHS[name];
+  if (!spec) return null;
+  const segments = spec.split("|");
+  const isFilled = name === "dot";
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+      style={{ flexShrink: 0, ...style }}
+    >
+      {segments.map((seg, i) => <path key={i} d={seg} fill={isFilled ? color : "none"} />)}
+    </svg>
+  );
+}
+
+/* ---------------------------------------------------------------
+   TOKENS / HELPERS
+--------------------------------------------------------------- */
+const STATUS = {
+  "Not Started": { color: "var(--gray)", bg: "rgba(139,148,163,0.15)" },
+  "In Progress": { color: "var(--blue)", bg: "rgba(91,157,226,0.15)" },
+  "Blocked": { color: "var(--red)", bg: "rgba(226,102,91,0.15)" },
+  "Done": { color: "var(--green)", bg: "rgba(76,175,125,0.15)" },
+};
+const PRIORITY = {
+  High: "var(--red)",
+  Medium: "var(--accent)",
+  Low: "var(--text-dim)",
+};
+const PROGRAM_STATUS = {
+  "On Track": { color: "var(--green)", bg: "rgba(76,175,125,0.15)" },
+  "At Risk": { color: "var(--accent)", bg: "rgba(232,163,61,0.15)" },
+  "Off Track": { color: "var(--red)", bg: "rgba(226,102,91,0.15)" },
+  "Planning": { color: "var(--blue)", bg: "rgba(91,157,226,0.15)" },
+};
+const TEAM_COLORS = ["#E8A33D", "#5B9DE2", "#4CAF7D", "#E2665B", "#B57EDC", "#5FC9C0"];
+
+let __id = 1000;
+const uid = (p = "id") => `${p}_${__id++}_${Math.random().toString(36).slice(2, 6)}`;
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function addDays(iso, n) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function fmtDate(iso, opts) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-US", opts || { month: "short", day: "numeric" });
+}
+function daysBetween(a, b) {
+  return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+}
+function isOverdue(iso) {
+  return iso && iso < todayISO();
+}
+
+/* ---------------------------------------------------------------
+   SEED DATA
+--------------------------------------------------------------- */
+const seedTeam = [
+  { id: "tm1", name: "Priya Nair", role: "Program Manager", color: TEAM_COLORS[0] },
+  { id: "tm2", name: "Marcus Webb", role: "Ops Analyst", color: TEAM_COLORS[1] },
+  { id: "tm3", name: "Elena Cho", role: "Customer Success Lead", color: TEAM_COLORS[2] },
+  { id: "tm4", name: "Devon Ruiz", role: "Implementation Specialist", color: TEAM_COLORS[3] },
+];
+
+const seedPrograms = [
+  {
+    id: "pr1", name: "Regional Rollout — Southeast", status: "At Risk", owner: "tm1",
+    startDate: addDays(todayISO(), -20), endDate: addDays(todayISO(), 40),
+    notes: "Vendor onboarding is lagging; watch the training milestone closely.",
+    milestones: [
+      { id: uid("ms"), title: "Vendor contracts signed", date: addDays(todayISO(), -10), done: true },
+      { id: uid("ms"), title: "Site readiness assessment", date: addDays(todayISO(), 3), done: false },
+      { id: uid("ms"), title: "Staff training complete", date: addDays(todayISO(), 18), done: false },
+      { id: uid("ms"), title: "Go-live", date: addDays(todayISO(), 38), done: false },
+    ],
+  },
+  {
+    id: "pr2", name: "Process Automation Initiative", status: "On Track", owner: "tm2",
+    startDate: addDays(todayISO(), -8), endDate: addDays(todayISO(), 30),
+    notes: "Ahead of schedule on workflow mapping.",
+    milestones: [
+      { id: uid("ms"), title: "Workflow audit", date: addDays(todayISO(), -3), done: true },
+      { id: uid("ms"), title: "Tooling selected", date: addDays(todayISO(), 5), done: false },
+      { id: uid("ms"), title: "Pilot team live", date: addDays(todayISO(), 22), done: false },
+    ],
+  },
+  {
+    id: "pr3", name: "Customer Onboarding Redesign", status: "Planning", owner: "tm3",
+    startDate: addDays(todayISO(), 2), endDate: addDays(todayISO(), 55),
+    notes: "Kickoff scheduled once discovery interviews wrap.",
+    milestones: [
+      { id: uid("ms"), title: "Discovery interviews", date: addDays(todayISO(), 6), done: false },
+    ],
+  },
+];
+
+const seedTasks = [
+  { id: "t1", title: "Finalize SE vendor training schedule", priority: "High", dueDate: addDays(todayISO(), 2), status: "In Progress", programId: "pr1", customerId: null, assigneeId: "tm1", durationDays: 3, dependsOn: [], notes: "" },
+  { id: "t2", title: "Site readiness checklist review", priority: "High", dueDate: addDays(todayISO(), 4), status: "Not Started", programId: "pr1", customerId: null, assigneeId: "tm4", durationDays: 2, dependsOn: ["t1"], notes: "" },
+  { id: "t3", title: "Book training venues", priority: "Medium", dueDate: addDays(todayISO(), 6), status: "Not Started", programId: "pr1", customerId: null, assigneeId: "tm4", durationDays: 2, dependsOn: ["t1"], notes: "" },
+  { id: "t4", title: "Run staff training sessions", priority: "High", dueDate: addDays(todayISO(), 18), status: "Not Started", programId: "pr1", customerId: null, assigneeId: "tm3", durationDays: 5, dependsOn: ["t2", "t3"], notes: "" },
+  { id: "t5", title: "Go-live readiness review", priority: "High", dueDate: addDays(todayISO(), 36), status: "Not Started", programId: "pr1", customerId: null, assigneeId: "tm1", durationDays: 2, dependsOn: ["t4"], notes: "" },
+  { id: "t6", title: "Map current-state workflows", priority: "Medium", dueDate: addDays(todayISO(), -3), status: "Done", programId: "pr2", customerId: null, assigneeId: "tm2", durationDays: 4, dependsOn: [], notes: "" },
+  { id: "t7", title: "Evaluate automation tooling options", priority: "Medium", dueDate: addDays(todayISO(), 5), status: "In Progress", programId: "pr2", customerId: null, assigneeId: "tm2", durationDays: 5, dependsOn: ["t6"], notes: "" },
+  { id: "t8", title: "Prep customer QBR deck — Horizon Retail", priority: "Medium", dueDate: addDays(todayISO(), 1), status: "Not Started", programId: null, customerId: "c1", assigneeId: "tm3", durationDays: 1, dependsOn: [], notes: "" },
+  { id: "t9", title: "Follow up on Meridian contract renewal", priority: "High", dueDate: addDays(todayISO(), 0), status: "Blocked", programId: null, customerId: "c2", assigneeId: "tm3", durationDays: 1, dependsOn: [], notes: "Waiting on legal redline." },
+  { id: "t10", title: "Draft discovery interview guide", priority: "Low", dueDate: addDays(todayISO(), 7), status: "Not Started", programId: "pr3", customerId: null, assigneeId: "tm3", durationDays: 2, dependsOn: [], notes: "" },
+];
+
+const seedCustomers = [
+  {
+    id: "c1", name: "Horizon Retail Group", org: "Horizon Retail Group", programId: "pr1",
+    lastTouch: addDays(todayISO(), -6), nextFollowUp: addDays(todayISO(), 1),
+    interactions: [
+      { id: uid("in"), date: addDays(todayISO(), -6), type: "Call", notes: "Reviewed rollout timeline, flagged staffing concerns." },
+      { id: uid("in"), date: addDays(todayISO(), -20), type: "Meeting", notes: "Kickoff meeting, aligned on scope." },
+    ],
+  },
+  {
+    id: "c2", name: "Meridian Health Systems", org: "Meridian Health Systems", programId: null,
+    lastTouch: addDays(todayISO(), -2), nextFollowUp: addDays(todayISO(), 0),
+    interactions: [
+      { id: uid("in"), date: addDays(todayISO(), -2), type: "Email", notes: "Sent revised contract terms, awaiting legal review." },
+    ],
+  },
+  {
+    id: "c3", name: "Calloway Logistics", org: "Calloway Logistics", programId: "pr2",
+    lastTouch: addDays(todayISO(), -14), nextFollowUp: addDays(todayISO(), 9),
+    interactions: [
+      { id: uid("in"), date: addDays(todayISO(), -14), type: "Meeting", notes: "Walked through automation pilot plan." },
+    ],
+  },
+];
+
+/* ---------------------------------------------------------------
+   CRITICAL PATH METHOD
+--------------------------------------------------------------- */
+function computeCPM(tasks) {
+  const map = {};
+  tasks.forEach((t) => (map[t.id] = t));
+  const es = {}, ef = {}, visitingF = new Set();
+
+  function getEF(id) {
+    if (ef[id] !== undefined) return ef[id];
+    if (visitingF.has(id)) return 0; // guard against accidental cycles
+    visitingF.add(id);
+    const t = map[id];
+    const deps = (t.dependsOn || []).filter((d) => map[d]);
+    const start = deps.length ? Math.max(...deps.map((d) => getEF(d))) : 0;
+    es[id] = start;
+    ef[id] = start + Math.max(1, t.durationDays || 1);
+    visitingF.delete(id);
+    return ef[id];
+  }
+  tasks.forEach((t) => getEF(t.id));
+  const projectEnd = tasks.length ? Math.max(...tasks.map((t) => ef[t.id])) : 0;
+
+  const successors = {};
+  tasks.forEach((t) => (successors[t.id] = []));
+  tasks.forEach((t) => (t.dependsOn || []).forEach((d) => { if (successors[d]) successors[d].push(t.id); }));
+
+  const lf = {}, ls = {}, visitingB = new Set();
+  function getLF(id) {
+    if (lf[id] !== undefined) return lf[id];
+    if (visitingB.has(id)) return projectEnd;
+    visitingB.add(id);
+    const succs = successors[id];
+    const val = succs.length ? Math.min(...succs.map((s) => getLS(s))) : projectEnd;
+    lf[id] = val;
+    visitingB.delete(id);
+    return val;
+  }
+  function getLS(id) {
+    if (ls[id] !== undefined) return ls[id];
+    const t = map[id];
+    const val = getLF(id) - Math.max(1, t.durationDays || 1);
+    ls[id] = val;
+    return val;
+  }
+  tasks.forEach((t) => { getLF(t.id); getLS(t.id); });
+
+  const result = {};
+  tasks.forEach((t) => {
+    const slack = ls[t.id] - es[t.id];
+    result[t.id] = { es: es[t.id], ef: ef[t.id], ls: ls[t.id], lf: lf[t.id], slack, critical: slack <= 0 };
+  });
+  return { cpm: result, projectEnd };
+}
+
+/* ---------------------------------------------------------------
+   SMALL UI PRIMITIVES
+--------------------------------------------------------------- */
+function Badge({ children, color, bg }) {
+  return (
+    <span
+      className="badge"
+      style={{ color, background: bg, borderColor: color }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function IconBtn({ onClick, title, children, danger }) {
+  return (
+    <button className={`icon-btn ${danger ? "danger" : ""}`} onClick={onClick} title={title} type="button">
+      {children}
+    </button>
+  );
+}
+
+function PersonChip({ member }) {
+  if (!member) return <span className="dim-text">Unassigned</span>;
+  return (
+    <span className="person-chip">
+      <span className="avatar-dot" style={{ background: member.color }}>{member.name.charAt(0)}</span>
+      {member.name}
+    </span>
+  );
+}
+
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`modal-panel ${wide ? "wide" : ""}`}>
+        <div className="modal-header">
+          <h3>{title}</h3>
+          <IconBtn onClick={onClose} title="Close"><Icon name="x" size={16} /></IconBtn>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function EmptyState({ icon, title, body }) {
+  return (
+    <div className="empty-state">
+      {icon}
+      <h4>{title}</h4>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   MAIN APP
+--------------------------------------------------------------- */
+const STORAGE_KEY = "ops-command-planner-data-v1";
+const NAME_KEY = "ops-command-my-name";
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return fmtDate(iso.slice(0, 10));
+}
+
+function loadSavedData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.team && parsed.programs && parsed.tasks && parsed.customers) return parsed;
+    }
+  } catch (e) { console.error("Could not read saved Ops Command data", e); }
+  return null;
+}
+
+function OpsCommand() {
+  const initialRef = useRef(null);
+  if (initialRef.current === null) {
+    initialRef.current = loadSavedData() || { team: seedTeam, programs: seedPrograms, tasks: seedTasks, customers: seedCustomers };
+  }
+  const initial = initialRef.current;
+
+  const [view, setView] = useState("dashboard");
+  const [team, setTeam] = useState(initial.team);
+  const [programs, setPrograms] = useState(initial.programs);
+  const [tasks, setTasks] = useState(initial.tasks);
+  const [customers, setCustomers] = useState(initial.customers);
+
+  const [loaded] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState(false);
+  const [lastSynced, setLastSynced] = useState(null);
+  const saveTimerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const [currentUser, setCurrentUser] = useState(null);
+  const [nameLoaded, setNameLoaded] = useState(false);
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
+
+  // modal state: { type: 'task'|'program'|'customer'|'team', mode:'add'|'edit', data }
+  const [modal, setModal] = useState(null);
+  const modalRef = useRef(modal);
+  useEffect(() => { modalRef.current = modal; }, [modal]);
+
+  // load "who am I" — stored in this browser only
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(NAME_KEY);
+      if (saved) setCurrentUser(saved);
+      else setShowNamePrompt(true);
+    } catch (e) {
+      setShowNamePrompt(true);
+    }
+    setNameLoaded(true);
+  }, []);
+
+  const saveMyName = (name) => {
+    const trimmed = (name || "").trim() || "Someone";
+    setCurrentUser(trimmed);
+    setShowNamePrompt(false);
+    try { localStorage.setItem(NAME_KEY, trimmed); } catch (e) { /* ignore */ }
+  };
+
+  const stamp = (obj) => ({ ...obj, editedBy: currentUser || "Someone", editedAt: new Date().toISOString() });
+
+  // auto-save to this browser's local storage whenever data changes
+  useEffect(() => {
+    try {
+      setSyncing(true);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ team, programs, tasks, customers }));
+      setSyncError(false);
+      setLastSynced(new Date());
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => setSyncing(false), 400);
+    } catch (e) {
+      setSyncError(true);
+      setSyncing(false);
+    }
+  }, [team, programs, tasks, customers]);
+
+  const pullLatest = () => {
+    const data = loadSavedData();
+    if (data) {
+      setTeam(data.team || []);
+      setPrograms(data.programs || []);
+      setTasks(data.tasks || []);
+      setCustomers(data.customers || []);
+    }
+    setLastSynced(new Date());
+  };
+
+  const exportData = () => {
+    const blob = new Blob([JSON.stringify({ team, programs, tasks, customers }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ops-command-backup-${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!window.confirm("Import will replace everything currently in the planner. Continue?")) return;
+        setTeam(parsed.team || []);
+        setPrograms(parsed.programs || []);
+        setTasks(parsed.tasks || []);
+        setCustomers(parsed.customers || []);
+      } catch (err) {
+        window.alert("That file couldn't be read. Make sure it's an Ops Command backup (.json).");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const resetToSample = () => {
+    if (!window.confirm("Reset to the sample data? Everything you've entered will be erased.")) return;
+    setTeam(seedTeam);
+    setPrograms(seedPrograms);
+    setTasks(seedTasks);
+    setCustomers(seedCustomers);
+  };
+
+  const teamById = useMemo(() => Object.fromEntries(team.map((m) => [m.id, m])), [team]);
+  const programById = useMemo(() => Object.fromEntries(programs.map((p) => [p.id, p])), [programs]);
+  const customerById = useMemo(() => Object.fromEntries(customers.map((c) => [c.id, c])), [customers]);
+
+  /* ---------- mutators ---------- */
+  const saveTask = (data) => {
+    const stamped = stamp(data);
+    setTasks((prev) => {
+      const exists = prev.some((t) => t.id === stamped.id);
+      return exists ? prev.map((t) => (t.id === stamped.id ? stamped : t)) : [...prev, stamped];
+    });
+    setModal(null);
+  };
+  const deleteTask = (id) => setTasks((prev) => prev.filter((t) => t.id !== id));
+
+  const saveProgram = (data) => {
+    const stamped = stamp(data);
+    setPrograms((prev) => {
+      const exists = prev.some((p) => p.id === stamped.id);
+      return exists ? prev.map((p) => (p.id === stamped.id ? stamped : p)) : [...prev, stamped];
+    });
+    setModal(null);
+  };
+  const deleteProgram = (id) => {
+    setPrograms((prev) => prev.filter((p) => p.id !== id));
+    setTasks((prev) => prev.map((t) => (t.programId === id ? { ...t, programId: null } : t)));
+  };
+
+  const saveCustomer = (data) => {
+    const stamped = stamp(data);
+    setCustomers((prev) => {
+      const exists = prev.some((c) => c.id === stamped.id);
+      return exists ? prev.map((c) => (c.id === stamped.id ? stamped : c)) : [...prev, stamped];
+    });
+    setModal(null);
+  };
+  const deleteCustomer = (id) => setCustomers((prev) => prev.filter((c) => c.id !== id));
+
+  const saveTeamMember = (data) => {
+    setTeam((prev) => {
+      const exists = prev.some((m) => m.id === data.id);
+      return exists ? prev.map((m) => (m.id === data.id ? data : m)) : [...prev, data];
+    });
+    setModal(null);
+  };
+  const deleteTeamMember = (id) => {
+    setTeam((prev) => prev.filter((m) => m.id !== id));
+    setTasks((prev) => prev.map((t) => (t.assigneeId === id ? { ...t, assigneeId: null } : t)));
+  };
+
+  const toggleTaskDone = (id) => {
+    setTasks((prev) => prev.map((t) => t.id === id ? stamp({ ...t, status: t.status === "Done" ? "Not Started" : "Done" }) : t));
+  };
+
+  const toggleMilestone = (programId, msId) => {
+    setPrograms((prev) => prev.map((p) => p.id !== programId ? p : stamp({
+      ...p, milestones: p.milestones.map((m) => m.id === msId ? { ...m, done: !m.done } : m),
+    })));
+  };
+
+  const NAV = [
+    { key: "dashboard", label: "Dashboard", icon: "grid" },
+    { key: "tasks", label: "Tasks", icon: "check" },
+    { key: "programs", label: "Programs", icon: "folder" },
+    { key: "customers", label: "Customers", icon: "users" },
+    { key: "calendar", label: "Calendar", icon: "calendar" },
+    { key: "gantt", label: "Gantt", icon: "chart" },
+    { key: "team", label: "Team", icon: "usercog" },
+  ];
+
+  if (!loaded) {
+    return (
+      <div className="app-shell">
+        <style>{CSS}</style>
+        <div className="loading-screen">
+          <div className="brand-mark">OC</div>
+          <div>Loading shared planner…</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <style>{CSS}</style>
+
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">OC</div>
+          <div className="brand-text">
+            <div className="brand-title">Ops Command</div>
+            <div className="brand-sub">Programs &amp; Operations</div>
+          </div>
+        </div>
+        <nav className="nav">
+          {NAV.map((n) => (
+            <button
+              key={n.key}
+              className={`nav-item ${view === n.key ? "active" : ""}`}
+              onClick={() => setView(n.key)}
+              type="button"
+            >
+              <Icon name={n.icon} size={17} />
+              <span>{n.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="status-line">
+            You: <strong style={{ color: "var(--text)" }}>{currentUser || "…"}</strong>
+            <button type="button" className="link-btn" onClick={() => setShowNamePrompt(true)}>change</button>
+          </div>
+          <div className="status-line">
+            <span className={`sync-dot ${syncError ? "err" : syncing ? "busy" : "ok"}`} />
+            {syncError ? "Save failed" : syncing ? "Saving…" : "Saved on this device"}
+          </div>
+          <div className="status-line dim-text">
+            {lastSynced ? `Last saved ${lastSynced.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+          </div>
+          <button type="button" className="footer-btn" onClick={pullLatest}>Refresh from this browser</button>
+          <div className="status-line" style={{ marginTop: 8 }}><Icon name="dot" size={12} color="var(--green)" /> {programs.filter(p=>p.status==="On Track").length} on track</div>
+          <div className="status-line"><Icon name="dot" size={12} color="var(--red)" /> {programs.filter(p=>p.status==="Off Track").length} off track</div>
+          <div className="data-actions">
+            <button type="button" className="footer-btn" onClick={exportData}>Export backup</button>
+            <button type="button" className="footer-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()}>Import backup</button>
+            <input ref={fileInputRef} type="file" accept="application/json" style={{ display: "none" }} onChange={importData} />
+            <button type="button" className="footer-btn danger" onClick={resetToSample}>Reset sample data</button>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main">
+        {view === "dashboard" && (
+          <Dashboard
+            tasks={tasks} programs={programs} customers={customers} team={team}
+            teamById={teamById} programById={programById}
+            onToggleTask={toggleTaskDone}
+            onGo={setView}
+          />
+        )}
+        {view === "tasks" && (
+          <TasksView
+            tasks={tasks} programs={programs} customers={customers} team={team}
+            teamById={teamById} programById={programById} customerById={customerById}
+            onAdd={() => setModal({ type: "task", mode: "add" })}
+            onEdit={(t) => setModal({ type: "task", mode: "edit", data: t })}
+            onDelete={deleteTask}
+            onToggleDone={toggleTaskDone}
+          />
+        )}
+        {view === "programs" && (
+          <ProgramsView
+            programs={programs} tasks={tasks} customers={customers} teamById={teamById}
+            onAdd={() => setModal({ type: "program", mode: "add" })}
+            onEdit={(p) => setModal({ type: "program", mode: "edit", data: p })}
+            onDelete={deleteProgram}
+            onToggleMilestone={toggleMilestone}
+          />
+        )}
+        {view === "customers" && (
+          <CustomersView
+            customers={customers} programs={programs} programById={programById}
+            onAdd={() => setModal({ type: "customer", mode: "add" })}
+            onEdit={(c) => setModal({ type: "customer", mode: "edit", data: c })}
+            onDelete={deleteCustomer}
+            onSave={saveCustomer}
+          />
+        )}
+        {view === "calendar" && (
+          <CalendarView tasks={tasks} customers={customers} programs={programs} teamById={teamById} />
+        )}
+        {view === "gantt" && (
+          <GanttView tasks={tasks} programs={programs} teamById={teamById} />
+        )}
+        {view === "team" && (
+          <TeamView
+            team={team} tasks={tasks}
+            onAdd={() => setModal({ type: "team", mode: "add" })}
+            onEdit={(m) => setModal({ type: "team", mode: "edit", data: m })}
+            onDelete={deleteTeamMember}
+          />
+        )}
+      </main>
+
+      {modal?.type === "task" && (
+        <TaskModal
+          initial={modal.data} programs={programs} customers={customers} team={team} tasks={tasks}
+          onClose={() => setModal(null)} onSave={saveTask}
+        />
+      )}
+      {modal?.type === "program" && (
+        <ProgramModal
+          initial={modal.data} team={team}
+          onClose={() => setModal(null)} onSave={saveProgram}
+        />
+      )}
+      {modal?.type === "customer" && (
+        <CustomerModal
+          initial={modal.data} programs={programs}
+          onClose={() => setModal(null)} onSave={saveCustomer}
+        />
+      )}
+      {modal?.type === "team" && (
+        <TeamModal
+          initial={modal.data}
+          onClose={() => setModal(null)} onSave={saveTeamMember}
+        />
+      )}
+      {showNamePrompt && nameLoaded && (
+        <NamePromptModal
+          initial={currentUser}
+          onSave={saveMyName}
+          onClose={currentUser ? () => setShowNamePrompt(false) : null}
+        />
+      )}
+    </div>
+  );
+}
+
+function NamePromptModal({ initial, onSave, onClose }) {
+  const [name, setName] = useState(initial || "");
+  return (
+    <Modal title="Who's editing?" onClose={onClose || (() => {})}>
+      <Field label="Your name">
+        <input
+          autoFocus value={name} onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Jordan Lee"
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onSave(name); }}
+        />
+      </Field>
+      <p className="dim-text small" style={{ marginTop: -6, marginBottom: 14 }}>
+        This planner is shared with your team. Your name will show up next to changes you make, so everyone can see who last touched a task or program.
+      </p>
+      <div className="modal-actions">
+        {onClose && <button className="btn-ghost" onClick={onClose} type="button">Cancel</button>}
+        <button className="btn-primary" onClick={() => name.trim() && onSave(name)} type="button">Save name</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------
+   DASHBOARD
+--------------------------------------------------------------- */
+function Dashboard({ tasks, programs, customers, teamById, programById, onToggleTask, onGo }) {
+  const today = todayISO();
+  const dueSoon = tasks
+    .filter((t) => t.status !== "Done" && t.dueDate && t.dueDate <= addDays(today, 7))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const upcomingEngagements = customers
+    .filter((c) => c.nextFollowUp)
+    .sort((a, b) => a.nextFollowUp.localeCompare(b.nextFollowUp))
+    .slice(0, 5);
+  const atRisk = programs.filter((p) => p.status === "At Risk" || p.status === "Off Track");
+  const openTasks = tasks.filter((t) => t.status !== "Done").length;
+  const overdueCount = tasks.filter((t) => t.status !== "Done" && isOverdue(t.dueDate)).length;
+
+  return (
+    <div>
+      <PageHeader eyebrow={fmtDate(today, { weekday: "long", month: "long", day: "numeric" })} title="Dashboard" />
+
+      <div className="stat-row">
+        <StatCard label="Open tasks" value={openTasks} tone="blue" onClick={() => onGo("tasks")} />
+        <StatCard label="Overdue" value={overdueCount} tone="red" onClick={() => onGo("tasks")} />
+        <StatCard label="Active programs" value={programs.length} tone="accent" onClick={() => onGo("programs")} />
+        <StatCard label="Customer accounts" value={customers.length} tone="green" onClick={() => onGo("customers")} />
+      </div>
+
+      <div className="dash-grid">
+        <div className="panel">
+          <div className="panel-head"><h3>Due this week</h3><span className="dim-text">{dueSoon.length} items</span></div>
+          {dueSoon.length === 0 ? (
+            <EmptyState icon={<Icon name="checkcircle" size={22} />} title="Nothing due" body="You're clear for the next 7 days." />
+          ) : (
+            <ul className="simple-list">
+              {dueSoon.slice(0, 7).map((t) => (
+                <li key={t.id} className="simple-row">
+                  <button className="check-circle" onClick={() => onToggleTask(t.id)} aria-label="toggle done">
+                    <Icon name="checkcircle" size={16} />
+                  </button>
+                  <div className="simple-main">
+                    <div className="simple-title">{t.title}</div>
+                    <div className="simple-sub">
+                      {t.programId && programById[t.programId] ? programById[t.programId].name : "No program"}
+                      {" · "}<PersonChip member={teamById[t.assigneeId]} />
+                    </div>
+                  </div>
+                  <span className={`due-tag ${isOverdue(t.dueDate) ? "overdue" : ""}`}>{fmtDate(t.dueDate)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-head"><h3>Upcoming customer engagements</h3></div>
+          {upcomingEngagements.length === 0 ? (
+            <EmptyState icon={<Icon name="users" size={22} />} title="No follow-ups scheduled" body="Add a next-touch date on a customer to see it here." />
+          ) : (
+            <ul className="simple-list">
+              {upcomingEngagements.map((c) => (
+                <li key={c.id} className="simple-row">
+                  <span className="avatar-dot" style={{ background: "var(--surface-2)", color: "var(--text)" }}>
+                    {c.name.charAt(0)}
+                  </span>
+                  <div className="simple-main">
+                    <div className="simple-title">{c.name}</div>
+                    <div className="simple-sub">Last touch {fmtDate(c.lastTouch)}</div>
+                  </div>
+                  <span className={`due-tag ${isOverdue(c.nextFollowUp) ? "overdue" : ""}`}>{fmtDate(c.nextFollowUp)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="panel span-2">
+          <div className="panel-head"><h3>Programs needing attention</h3></div>
+          {atRisk.length === 0 ? (
+            <EmptyState icon={<Icon name="flag" size={22} />} title="All programs on track" body="Nothing flagged as at-risk or off-track right now." />
+          ) : (
+            <div className="program-flag-grid">
+              {atRisk.map((p) => (
+                <div key={p.id} className="program-flag-card">
+                  <div className="pf-top">
+                    <Badge color={PROGRAM_STATUS[p.status].color} bg={PROGRAM_STATUS[p.status].bg}>{p.status}</Badge>
+                    <span className="dim-text mono-num">{fmtDate(p.endDate)}</span>
+                  </div>
+                  <div className="pf-title">{p.name}</div>
+                  <div className="pf-owner"><PersonChip member={teamById[p.owner]} /></div>
+                  {p.notes && <div className="pf-notes">{p.notes}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, tone, onClick }) {
+  return (
+    <button className={`stat-card tone-${tone}`} onClick={onClick} type="button">
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+    </button>
+  );
+}
+
+function PageHeader({ eyebrow, title, action }) {
+  return (
+    <div className="page-header">
+      <div>
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        <h1>{title}</h1>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   TASKS VIEW
+--------------------------------------------------------------- */
+function TasksView({ tasks, programs, customers, team, teamById, programById, customerById, onAdd, onEdit, onDelete, onToggleDone }) {
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [filterProgram, setFilterProgram] = useState("All");
+  const [sortBy, setSortBy] = useState("dueDate");
+
+  const filtered = tasks
+    .filter((t) => filterStatus === "All" || t.status === filterStatus)
+    .filter((t) => filterProgram === "All" || t.programId === filterProgram)
+    .sort((a, b) => {
+      if (sortBy === "dueDate") return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+      if (sortBy === "priority") return ["High", "Medium", "Low"].indexOf(a.priority) - ["High", "Medium", "Low"].indexOf(b.priority);
+      return a.title.localeCompare(b.title);
+    });
+
+  return (
+    <div>
+      <PageHeader
+        title="Tasks"
+        action={<button className="btn-primary" onClick={onAdd}><Icon name="plus" size={15} /> New task</button>}
+      />
+
+      <div className="filter-bar">
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option>All</option>
+          {Object.keys(STATUS).map((s) => <option key={s}>{s}</option>)}
+        </select>
+        <select value={filterProgram} onChange={(e) => setFilterProgram(e.target.value)}>
+          <option value="All">All programs</option>
+          {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+          <option value="dueDate">Sort by due date</option>
+          <option value="priority">Sort by priority</option>
+          <option value="title">Sort by title</option>
+        </select>
+        <span className="dim-text" style={{ marginLeft: "auto" }}>{filtered.length} of {tasks.length}</span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState icon={<Icon name="check" size={22} />} title="No tasks match" body="Try a different filter, or add a new task." />
+      ) : (
+        <div className="table">
+          <div className="table-row table-head">
+            <div className="col-check"></div>
+            <div className="col-title">Task</div>
+            <div className="col-sm">Priority</div>
+            <div className="col-sm">Status</div>
+            <div className="col-md">Program / Customer</div>
+            <div className="col-sm">Assignee</div>
+            <div className="col-sm">Due</div>
+            <div className="col-actions"></div>
+          </div>
+          {filtered.map((t) => (
+            <div className="table-row" key={t.id}>
+              <div className="col-check">
+                <button className="check-circle" onClick={() => onToggleDone(t.id)}>
+                  <Icon name="checkcircle" size={17} color={t.status === "Done" ? "var(--green)" : "var(--text-dim)"} />
+                </button>
+              </div>
+              <div className="col-title">
+                <div className={t.status === "Done" ? "strike" : ""}>{t.title}</div>
+                {t.notes && <div className="dim-text small">{t.notes}</div>}
+                {t.editedBy && <div className="edit-tag">Edited by {t.editedBy} · {timeAgo(t.editedAt)}</div>}
+              </div>
+              <div className="col-sm"><span className="dot-label"><span className="dot" style={{ background: PRIORITY[t.priority] }} />{t.priority}</span></div>
+              <div className="col-sm"><Badge color={STATUS[t.status].color} bg={STATUS[t.status].bg}>{t.status}</Badge></div>
+              <div className="col-md">
+                {t.programId && programById[t.programId] && <div className="link-tag"><Icon name="link" size={12} />{programById[t.programId].name}</div>}
+                {t.customerId && customerById[t.customerId] && <div className="link-tag"><Icon name="building" size={12} />{customerById[t.customerId].name}</div>}
+                {!t.programId && !t.customerId && <span className="dim-text">—</span>}
+              </div>
+              <div className="col-sm"><PersonChip member={teamById[t.assigneeId]} /></div>
+              <div className="col-sm">
+                <span className={`due-tag ${t.status !== "Done" && isOverdue(t.dueDate) ? "overdue" : ""}`}>{fmtDate(t.dueDate)}</span>
+              </div>
+              <div className="col-actions">
+                <IconBtn onClick={() => onEdit(t)} title="Edit"><Icon name="pencil" size={14} /></IconBtn>
+                <IconBtn onClick={() => onDelete(t.id)} title="Delete" danger><Icon name="trash" size={14} /></IconBtn>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskModal({ initial, programs, customers, team, tasks, onClose, onSave }) {
+  const [form, setForm] = useState(initial || {
+    id: uid("t"), title: "", priority: "Medium", dueDate: todayISO(), status: "Not Started",
+    programId: null, customerId: null, assigneeId: null, durationDays: 1, dependsOn: [], notes: "",
+  });
+  const sameProgramTasks = tasks.filter((t) => t.programId === form.programId && t.id !== form.id);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const toggleDep = (id) => setForm((f) => ({
+    ...f, dependsOn: f.dependsOn.includes(id) ? f.dependsOn.filter((d) => d !== id) : [...f.dependsOn, id],
+  }));
+
+  return (
+    <Modal title={initial ? "Edit task" : "New task"} onClose={onClose}>
+      <Field label="Title">
+        <input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Finalize vendor training schedule" />
+      </Field>
+      <div className="field-grid">
+        <Field label="Priority">
+          <select value={form.priority} onChange={(e) => set("priority", e.target.value)}>
+            {Object.keys(PRIORITY).map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </Field>
+        <Field label="Status">
+          <select value={form.status} onChange={(e) => set("status", e.target.value)}>
+            {Object.keys(STATUS).map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Due date">
+          <input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
+        </Field>
+        <Field label="Duration (days, for Gantt)">
+          <input type="number" min={1} value={form.durationDays} onChange={(e) => set("durationDays", parseInt(e.target.value) || 1)} />
+        </Field>
+      </div>
+      <div className="field-grid">
+        <Field label="Program">
+          <select value={form.programId || ""} onChange={(e) => set("programId", e.target.value || null)}>
+            <option value="">None</option>
+            {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Customer">
+          <select value={form.customerId || ""} onChange={(e) => set("customerId", e.target.value || null)}>
+            <option value="">None</option>
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Assignee">
+          <select value={form.assigneeId || ""} onChange={(e) => set("assigneeId", e.target.value || null)}>
+            <option value="">Unassigned</option>
+            {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      {form.programId && (
+        <Field label="Depends on (within same program — for critical path)">
+          <div className="chip-select">
+            {sameProgramTasks.length === 0 && <span className="dim-text small">No other tasks in this program yet.</span>}
+            {sameProgramTasks.map((t) => (
+              <button
+                type="button" key={t.id}
+                className={`chip ${form.dependsOn.includes(t.id) ? "chip-active" : ""}`}
+                onClick={() => toggleDep(t.id)}
+              >
+                {t.title}
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
+      <Field label="Notes">
+        <textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+      </Field>
+      <div className="modal-actions">
+        <button className="btn-ghost" onClick={onClose} type="button">Cancel</button>
+        <button className="btn-primary" onClick={() => form.title.trim() && onSave(form)} type="button">Save task</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------
+   PROGRAMS VIEW
+--------------------------------------------------------------- */
+function ProgramsView({ programs, tasks, teamById, onAdd, onEdit, onDelete, onToggleMilestone }) {
+  const [openId, setOpenId] = useState(programs[0]?.id || null);
+
+  return (
+    <div>
+      <PageHeader title="Programs" action={<button className="btn-primary" onClick={onAdd}><Icon name="plus" size={15} /> New program</button>} />
+      {programs.length === 0 ? (
+        <EmptyState icon={<Icon name="folder" size={22} />} title="No programs yet" body="Add your first program to start tracking milestones." />
+      ) : (
+        <div className="program-list">
+          {programs.map((p) => {
+            const progTasks = tasks.filter((t) => t.programId === p.id);
+            const doneCount = progTasks.filter((t) => t.status === "Done").length;
+            const msDone = p.milestones.filter((m) => m.done).length;
+            const isOpen = openId === p.id;
+            return (
+              <div key={p.id} className={`program-card ${isOpen ? "open" : ""}`}>
+                <div className="program-card-head" onClick={() => setOpenId(isOpen ? null : p.id)}>
+                  <div>
+                    <div className="pc-title-row">
+                      <span className="pc-title">{p.name}</span>
+                      <Badge color={PROGRAM_STATUS[p.status].color} bg={PROGRAM_STATUS[p.status].bg}>{p.status}</Badge>
+                    </div>
+                    <div className="dim-text small">
+                      <PersonChip member={teamById[p.owner]} /> · {fmtDate(p.startDate)} → {fmtDate(p.endDate)} · {progTasks.length} tasks ({doneCount} done) · {msDone}/{p.milestones.length} milestones
+                    </div>
+                    {p.editedBy && <div className="edit-tag">Edited by {p.editedBy} · {timeAgo(p.editedAt)}</div>}
+                  </div>
+                  <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                    <IconBtn onClick={() => onEdit(p)} title="Edit"><Icon name="pencil" size={14} /></IconBtn>
+                    <IconBtn onClick={() => onDelete(p.id)} title="Delete" danger><Icon name="trash" size={14} /></IconBtn>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div className="program-card-body">
+                    {p.notes && <p className="program-notes">{p.notes}</p>}
+                    <div className="milestone-list">
+                      {p.milestones.map((m) => (
+                        <div key={m.id} className="milestone-row" onClick={() => onToggleMilestone(p.id, m.id)}>
+                          <Icon name="checkcircle" size={16} color={m.done ? "var(--green)" : "var(--text-dim)"} />
+                          <span className={m.done ? "strike" : ""}>{m.title}</span>
+                          <span className="dim-text mono-num" style={{ marginLeft: "auto" }}>{fmtDate(m.date)}</span>
+                        </div>
+                      ))}
+                      {p.milestones.length === 0 && <span className="dim-text small">No milestones added.</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgramModal({ initial, team, onClose, onSave }) {
+  const [form, setForm] = useState(initial || {
+    id: uid("pr"), name: "", status: "Planning", owner: team[0]?.id || null,
+    startDate: todayISO(), endDate: addDays(todayISO(), 30), notes: "", milestones: [],
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const addMilestone = () => set("milestones", [...form.milestones, { id: uid("ms"), title: "", date: todayISO(), done: false }]);
+  const updateMilestone = (id, patch) => set("milestones", form.milestones.map((m) => m.id === id ? { ...m, ...patch } : m));
+  const removeMilestone = (id) => set("milestones", form.milestones.filter((m) => m.id !== id));
+
+  return (
+    <Modal title={initial ? "Edit program" : "New program"} onClose={onClose} wide>
+      <Field label="Program name">
+        <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Regional Rollout — Southeast" />
+      </Field>
+      <div className="field-grid">
+        <Field label="Status">
+          <select value={form.status} onChange={(e) => set("status", e.target.value)}>
+            {Object.keys(PROGRAM_STATUS).map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Owner">
+          <select value={form.owner || ""} onChange={(e) => set("owner", e.target.value || null)}>
+            <option value="">Unassigned</option>
+            {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Start date">
+          <input type="date" value={form.startDate} onChange={(e) => set("startDate", e.target.value)} />
+        </Field>
+        <Field label="Target end date">
+          <input type="date" value={form.endDate} onChange={(e) => set("endDate", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Notes / health summary">
+        <textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+      </Field>
+      <Field label="Milestones">
+        <div className="milestone-editor">
+          {form.milestones.map((m) => (
+            <div key={m.id} className="milestone-edit-row">
+              <input placeholder="Milestone title" value={m.title} onChange={(e) => updateMilestone(m.id, { title: e.target.value })} />
+              <input type="date" value={m.date} onChange={(e) => updateMilestone(m.id, { date: e.target.value })} />
+              <IconBtn onClick={() => removeMilestone(m.id)} title="Remove" danger><Icon name="trash" size={14} /></IconBtn>
+            </div>
+          ))}
+          <button type="button" className="btn-ghost small" onClick={addMilestone}><Icon name="plus" size={13} /> Add milestone</button>
+        </div>
+      </Field>
+      <div className="modal-actions">
+        <button className="btn-ghost" onClick={onClose} type="button">Cancel</button>
+        <button className="btn-primary" onClick={() => form.name.trim() && onSave(form)} type="button">Save program</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------
+   CUSTOMERS VIEW
+--------------------------------------------------------------- */
+function CustomersView({ customers, programs, programById, onAdd, onEdit, onDelete, onSave }) {
+  const [openId, setOpenId] = useState(customers[0]?.id || null);
+  const [interactionDraft, setInteractionDraft] = useState({ type: "Call", notes: "" });
+
+  const addInteraction = (customer) => {
+    if (!interactionDraft.notes.trim()) return;
+    const updated = {
+      ...customer,
+      lastTouch: todayISO(),
+      interactions: [{ id: uid("in"), date: todayISO(), type: interactionDraft.type, notes: interactionDraft.notes }, ...customer.interactions],
+    };
+    onSave(updated);
+    setInteractionDraft({ type: "Call", notes: "" });
+  };
+
+  return (
+    <div>
+      <PageHeader title="Customer engagements" action={<button className="btn-primary" onClick={onAdd}><Icon name="plus" size={15} /> New customer</button>} />
+      {customers.length === 0 ? (
+        <EmptyState icon={<Icon name="users" size={22} />} title="No customers yet" body="Add a customer account to start logging engagements." />
+      ) : (
+        <div className="customer-layout">
+          <div className="customer-list-col">
+            {customers.map((c) => (
+              <div key={c.id} className={`customer-list-item ${openId === c.id ? "active" : ""}`} onClick={() => setOpenId(c.id)}>
+                <span className="avatar-dot" style={{ background: "var(--surface-2)" }}>{c.name.charAt(0)}</span>
+                <div className="cl-main">
+                  <div className="cl-title">{c.name}</div>
+                  <div className="dim-text small">Next: <span className={isOverdue(c.nextFollowUp) ? "overdue-text" : ""}>{fmtDate(c.nextFollowUp)}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="customer-detail-col">
+            {customers.filter((c) => c.id === openId).map((c) => (
+              <div key={c.id} className="panel">
+                <div className="panel-head">
+                  <div>
+                    <h3>{c.name}</h3>
+                    {c.programId && programById[c.programId] && <div className="link-tag"><Icon name="link" size={12} />{programById[c.programId].name}</div>}
+                    {c.editedBy && <div className="edit-tag">Edited by {c.editedBy} · {timeAgo(c.editedAt)}</div>}
+                  </div>
+                  <div className="row-actions">
+                    <IconBtn onClick={() => onEdit(c)} title="Edit"><Icon name="pencil" size={14} /></IconBtn>
+                    <IconBtn onClick={() => onDelete(c.id)} title="Delete" danger><Icon name="trash" size={14} /></IconBtn>
+                  </div>
+                </div>
+                <div className="field-grid" style={{ marginBottom: 16 }}>
+                  <div className="stat-mini"><span className="dim-text small">Last touch</span><div className="mono-num">{fmtDate(c.lastTouch)}</div></div>
+                  <div className="stat-mini"><span className="dim-text small">Next follow-up</span><div className={`mono-num ${isOverdue(c.nextFollowUp) ? "overdue-text" : ""}`}>{fmtDate(c.nextFollowUp)}</div></div>
+                </div>
+
+                <h4 className="sub-head">Log an interaction</h4>
+                <div className="interaction-form">
+                  <select value={interactionDraft.type} onChange={(e) => setInteractionDraft((d) => ({ ...d, type: e.target.value }))}>
+                    <option>Call</option><option>Meeting</option><option>Email</option><option>Other</option>
+                  </select>
+                  <input placeholder="What happened?" value={interactionDraft.notes} onChange={(e) => setInteractionDraft((d) => ({ ...d, notes: e.target.value }))} />
+                  <button className="btn-primary small" type="button" onClick={() => addInteraction(c)}>Log</button>
+                </div>
+
+                <h4 className="sub-head">History</h4>
+                <ul className="interaction-list">
+                  {c.interactions.length === 0 && <li className="dim-text small">No interactions logged yet.</li>}
+                  {c.interactions.map((i) => (
+                    <li key={i.id} className="interaction-row">
+                      <Badge color="var(--blue)" bg="rgba(91,157,226,0.15)">{i.type}</Badge>
+                      <span>{i.notes}</span>
+                      <span className="dim-text mono-num" style={{ marginLeft: "auto" }}>{fmtDate(i.date)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerModal({ initial, programs, onClose, onSave }) {
+  const [form, setForm] = useState(initial || {
+    id: uid("c"), name: "", org: "", programId: null,
+    lastTouch: todayISO(), nextFollowUp: addDays(todayISO(), 7), interactions: [],
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  return (
+    <Modal title={initial ? "Edit customer" : "New customer"} onClose={onClose}>
+      <Field label="Customer / account name">
+        <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Horizon Retail Group" />
+      </Field>
+      <div className="field-grid">
+        <Field label="Linked program">
+          <select value={form.programId || ""} onChange={(e) => set("programId", e.target.value || null)}>
+            <option value="">None</option>
+            {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Next follow-up">
+          <input type="date" value={form.nextFollowUp} onChange={(e) => set("nextFollowUp", e.target.value)} />
+        </Field>
+      </div>
+      <div className="modal-actions">
+        <button className="btn-ghost" onClick={onClose} type="button">Cancel</button>
+        <button className="btn-primary" onClick={() => form.name.trim() && onSave(form)} type="button">Save customer</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------
+   CALENDAR VIEW
+--------------------------------------------------------------- */
+function CalendarView({ tasks, customers, programs, teamById }) {
+  const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+  const [selectedDay, setSelectedDay] = useState(todayISO());
+
+  const year = cursor.getFullYear(), month = cursor.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const isoFor = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  const itemsByDay = useMemo(() => {
+    const map = {};
+    tasks.forEach((t) => { if (t.dueDate) (map[t.dueDate] ||= []).push({ kind: "task", label: t.title, sub: t.status }); });
+    customers.forEach((c) => { if (c.nextFollowUp) (map[c.nextFollowUp] ||= []).push({ kind: "customer", label: c.name, sub: "Follow-up" }); });
+    programs.forEach((p) => p.milestones.forEach((m) => { (map[m.date] ||= []).push({ kind: "milestone", label: m.title, sub: p.name }); }));
+    return map;
+  }, [tasks, customers, programs]);
+
+  const selectedItems = itemsByDay[selectedDay] || [];
+
+  return (
+    <div>
+      <PageHeader title="Calendar" />
+      <div className="calendar-layout">
+        <div className="panel">
+          <div className="cal-nav">
+            <IconBtn onClick={() => setCursor(new Date(year, month - 1, 1))} title="Previous"><Icon name="chevleft" size={16} /></IconBtn>
+            <h3>{cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</h3>
+            <IconBtn onClick={() => setCursor(new Date(year, month + 1, 1))} title="Next"><Icon name="chevright" size={16} /></IconBtn>
+          </div>
+          <div className="cal-grid cal-weekdays">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="cal-weekday">{d}</div>)}
+          </div>
+          <div className="cal-grid">
+            {cells.map((d, idx) => {
+              if (d === null) return <div key={idx} className="cal-cell empty" />;
+              const iso = isoFor(d);
+              const items = itemsByDay[iso] || [];
+              const isToday = iso === todayISO();
+              const isSelected = iso === selectedDay;
+              return (
+                <div key={idx} className={`cal-cell ${isToday ? "today" : ""} ${isSelected ? "selected" : ""}`} onClick={() => setSelectedDay(iso)}>
+                  <span className="cal-date">{d}</span>
+                  <div className="cal-dots">
+                    {items.slice(0, 3).map((it, i) => (
+                      <span key={i} className={`cal-dot cal-dot-${it.kind}`} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head"><h3>{fmtDate(selectedDay, { weekday: "long", month: "long", day: "numeric" })}</h3></div>
+          {selectedItems.length === 0 ? (
+            <EmptyState icon={<Icon name="calendar" size={20} />} title="Nothing scheduled" body="No tasks, follow-ups, or milestones on this day." />
+          ) : (
+            <ul className="simple-list">
+              {selectedItems.map((it, i) => (
+                <li key={i} className="simple-row">
+                  <span className={`cal-dot cal-dot-${it.kind}`} style={{ position: "static" }} />
+                  <div className="simple-main">
+                    <div className="simple-title">{it.label}</div>
+                    <div className="simple-sub">{it.sub}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="legend">
+            <span><span className="cal-dot cal-dot-task" /> Task</span>
+            <span><span className="cal-dot cal-dot-customer" /> Follow-up</span>
+            <span><span className="cal-dot cal-dot-milestone" /> Milestone</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   GANTT VIEW
+--------------------------------------------------------------- */
+function GanttView({ tasks, programs, teamById }) {
+  const [programId, setProgramId] = useState(programs[0]?.id || null);
+  const progTasks = tasks.filter((t) => t.programId === programId);
+  const { cpm, projectEnd } = useMemo(() => computeCPM(progTasks), [progTasks]);
+  const dayWidth = 26;
+  const chartWidth = Math.max(300, (projectEnd || 1) * dayWidth + 40);
+  const program = programs.find((p) => p.id === programId);
+
+  const orderedTasks = [...progTasks].sort((a, b) => (cpm[a.id]?.es ?? 0) - (cpm[b.id]?.es ?? 0));
+
+  return (
+    <div>
+      <PageHeader title="Gantt & Critical Path" />
+      <div className="filter-bar">
+        <select value={programId || ""} onChange={(e) => setProgramId(e.target.value)}>
+          {programs.length === 0 && <option value="">No programs</option>}
+          {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        {program && <span className="dim-text">Project window: {fmtDate(program.startDate)} → {fmtDate(program.startDate ? addDays(program.startDate, projectEnd) : null)} ({projectEnd} days)</span>}
+        <div className="legend" style={{ marginLeft: "auto" }}>
+          <span><span className="legend-swatch" style={{ background: "var(--accent)" }} /> Critical path</span>
+          <span><span className="legend-swatch" style={{ background: "var(--blue)" }} /> Task</span>
+          <span><span className="legend-swatch dashed" /> Float / slack</span>
+        </div>
+      </div>
+
+      {progTasks.length === 0 ? (
+        <EmptyState icon={<Icon name="chart" size={22} />} title="No tasks in this program" body="Add tasks with durations and dependencies to see the schedule." />
+      ) : (
+        <div className="panel gantt-panel">
+          <div className="gantt-scroll">
+            <div className="gantt-chart" style={{ width: chartWidth }}>
+              {/* day scale */}
+              <div className="gantt-scale">
+                {Array.from({ length: projectEnd + 1 }, (_, d) => (
+                  d % 2 === 0 ? <div key={d} className="gantt-scale-tick" style={{ left: d * dayWidth }}>{d}</div> : null
+                ))}
+              </div>
+              {orderedTasks.map((t) => {
+                const c = cpm[t.id];
+                if (!c) return null;
+                const left = c.es * dayWidth;
+                const width = Math.max(dayWidth * 0.6, (c.ef - c.es) * dayWidth - 4);
+                const floatWidth = c.slack > 0 ? c.slack * dayWidth : 0;
+                return (
+                  <div className="gantt-row" key={t.id}>
+                    <div className="gantt-row-label">
+                      <span className={`crit-dot ${c.critical ? "crit" : ""}`} />
+                      <span className="gantt-task-title" title={t.title}>{t.title}</span>
+                    </div>
+                    <div className="gantt-track">
+                      <div
+                        className={`gantt-bar ${c.critical ? "critical" : ""}`}
+                        style={{ left, width }}
+                        title={`ES ${c.es} · EF ${c.ef} · Slack ${c.slack}d`}
+                      >
+                        <span className="gantt-bar-days">{c.ef - c.es}d</span>
+                      </div>
+                      {floatWidth > 0 && (
+                        <div className="gantt-float" style={{ left: left + width + 4, width: floatWidth - 4 }} title={`Slack: +${c.slack}d`} />
+                      )}
+                    </div>
+                    <div className="gantt-meta">
+                      <span className="mono-num">ES {c.es}</span>
+                      <span className="mono-num">LF {c.lf}</span>
+                      <span className={`mono-num ${c.critical ? "crit-text" : ""}`}>{c.critical ? "critical" : `±${c.slack}d`}</span>
+                      <PersonChip member={teamById[t.assigneeId]} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   TEAM VIEW
+--------------------------------------------------------------- */
+function TeamView({ team, tasks, onAdd, onEdit, onDelete }) {
+  return (
+    <div>
+      <PageHeader title="Team" action={<button className="btn-primary" onClick={onAdd}><Icon name="plus" size={15} /> Add team member</button>} />
+      {team.length === 0 ? (
+        <EmptyState icon={<Icon name="usercog" size={22} />} title="No team members yet" body="Add people so you can assign tasks to them." />
+      ) : (
+        <div className="team-grid">
+          {team.map((m) => {
+            const myTasks = tasks.filter((t) => t.assigneeId === m.id);
+            const open = myTasks.filter((t) => t.status !== "Done");
+            const overdue = open.filter((t) => isOverdue(t.dueDate));
+            return (
+              <div key={m.id} className="team-card">
+                <div className="team-card-head">
+                  <span className="avatar-dot lg" style={{ background: m.color }}>{m.name.charAt(0)}</span>
+                  <div>
+                    <div className="pc-title">{m.name}</div>
+                    <div className="dim-text small">{m.role}</div>
+                  </div>
+                  <div className="row-actions" style={{ marginLeft: "auto" }}>
+                    <IconBtn onClick={() => onEdit(m)} title="Edit"><Icon name="pencil" size={14} /></IconBtn>
+                    <IconBtn onClick={() => onDelete(m.id)} title="Delete" danger><Icon name="trash" size={14} /></IconBtn>
+                  </div>
+                </div>
+                <div className="team-stats">
+                  <div><div className="mono-num big">{open.length}</div><div className="dim-text small">Open tasks</div></div>
+                  <div><div className={`mono-num big ${overdue.length ? "overdue-text" : ""}`}>{overdue.length}</div><div className="dim-text small">Overdue</div></div>
+                  <div><div className="mono-num big">{myTasks.length - open.length}</div><div className="dim-text small">Completed</div></div>
+                </div>
+                {open.slice(0, 3).length > 0 && (
+                  <ul className="mini-task-list">
+                    {open.slice(0, 3).map((t) => <li key={t.id}>{t.title}</li>)}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TeamModal({ initial, onClose, onSave }) {
+  const [form, setForm] = useState(initial || { id: uid("tm"), name: "", role: "", color: TEAM_COLORS[Math.floor(Math.random() * TEAM_COLORS.length)] });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  return (
+    <Modal title={initial ? "Edit team member" : "Add team member"} onClose={onClose}>
+      <Field label="Name">
+        <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Jordan Lee" />
+      </Field>
+      <Field label="Role">
+        <input value={form.role} onChange={(e) => set("role", e.target.value)} placeholder="e.g. Program Manager" />
+      </Field>
+      <Field label="Color tag">
+        <div className="chip-select">
+          {TEAM_COLORS.map((c) => (
+            <button key={c} type="button" className={`color-swatch ${form.color === c ? "active" : ""}`} style={{ background: c }} onClick={() => set("color", c)} />
+          ))}
+        </div>
+      </Field>
+      <div className="modal-actions">
+        <button className="btn-ghost" onClick={onClose} type="button">Cancel</button>
+        <button className="btn-primary" onClick={() => form.name.trim() && onSave(form)} type="button">Save</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------
+   CSS
+--------------------------------------------------------------- */
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+.app-shell {
+  --bg: #12161C;
+  --surface: #181E27;
+  --surface-2: #212A36;
+  --border: #2A3240;
+  --text: #E7EAEE;
+  --text-dim: #8B94A3;
+  --accent: #E8A33D;
+  --accent-dim: rgba(232,163,61,0.15);
+  --green: #4CAF7D;
+  --blue: #5B9DE2;
+  --red: #E2665B;
+  --gray: #8B94A3;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.app-shell * { box-sizing: border-box; }
+.app-shell button { font-family: inherit; cursor: pointer; }
+.app-shell input, .app-shell select, .app-shell textarea {
+  font-family: inherit; font-size: 13px; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; width: 100%; outline: none;
+}
+.app-shell input:focus, .app-shell select:focus, .app-shell textarea:focus { border-color: var(--accent); }
+
+/* Sidebar */
+.sidebar {
+  width: 220px; flex-shrink: 0; background: #0E1218; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 20px 14px; position: sticky; top: 0; height: 100vh;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 22px; }
+.brand-mark {
+  width: 34px; height: 34px; border-radius: 7px; background: var(--accent-dim); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 13px; border: 1px solid rgba(232,163,61,0.35);
+}
+.brand-title { font-family: var(--font-display); font-weight: 600; font-size: 14.5px; letter-spacing: 0.2px; }
+.brand-sub { font-size: 11px; color: var(--text-dim); }
+.nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-dim); font-size: 13px; font-weight: 500; text-align: left;
+}
+.nav-item:hover { background: var(--surface); color: var(--text); }
+.nav-item.active { background: var(--accent-dim); color: var(--accent); }
+.sidebar-footer { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.status-line { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); }
+.edit-tag { font-size: 11px; color: var(--text-dim); margin-top: 3px; font-style: italic; }
+.link-btn { background: none; border: none; color: var(--accent); font-size: 11px; padding: 0; text-decoration: underline; cursor: pointer; }
+.sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; }
+.sync-dot.busy { background: var(--accent); }
+.sync-dot.err { background: var(--red); }
+.data-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.footer-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); font-size: 11.5px; padding: 6px 8px; border-radius: 5px; text-align: left; width: 100%; }
+.footer-btn:hover { color: var(--text); background: var(--surface-2); }
+.footer-btn.danger:hover { color: var(--red); border-color: var(--red); }
+.loading-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100%; gap: 12px; color: var(--text-dim); font-family: var(--font-body); font-size: 13px; }
+
+.main { flex: 1; padding: 32px 40px; max-width: 1280px; }
+
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; }
+.eyebrow { font-family: var(--font-mono); font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+.page-header h1 { font-family: var(--font-display); font-size: 24px; font-weight: 600; margin: 0; }
+
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--accent); color: #1A1300;
+  border: none; padding: 9px 14px; border-radius: 6px; font-weight: 600; font-size: 13px;
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary.small { padding: 7px 12px; font-size: 12.5px; }
+.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 9px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+.btn-ghost:hover { background: var(--surface-2); }
+.btn-ghost.small { padding: 6px 10px; font-size: 12px; }
+
+.icon-btn { background: transparent; border: 1px solid var(--border); color: var(--text-dim); border-radius: 5px; padding: 5px; display: inline-flex; }
+.icon-btn:hover { color: var(--text); background: var(--surface-2); }
+.icon-btn.danger:hover { color: var(--red); border-color: var(--red); }
+
+.dim-text { color: var(--text-dim); }
+.dim-text.small { font-size: 12px; }
+.small { font-size: 12px; }
+.mono-num { font-family: var(--font-mono); font-size: 12.5px; }
+.mono-num.big { font-size: 20px; font-weight: 600; color: var(--text); }
+.overdue-text { color: var(--red); }
+.strike { text-decoration: line-through; color: var(--text-dim); }
+.sub-head { font-family: var(--font-display); font-size: 13px; margin: 16px 0 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Stat cards */
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; text-align: left; border-left: 3px solid var(--border); }
+.stat-card.tone-blue { border-left-color: var(--blue); }
+.stat-card.tone-red { border-left-color: var(--red); }
+.stat-card.tone-accent { border-left-color: var(--accent); }
+.stat-card.tone-green { border-left-color: var(--green); }
+.stat-card:hover { background: var(--surface-2); }
+.stat-value { font-family: var(--font-mono); font-size: 26px; font-weight: 600; }
+.stat-label { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.dash-grid .span-2 { grid-column: 1 / -1; }
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.panel-head h3 { font-family: var(--font-display); font-size: 14.5px; font-weight: 600; margin: 0; }
+
+.simple-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.simple-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.simple-row:last-child { border-bottom: none; }
+.simple-main { flex: 1; min-width: 0; }
+.simple-title { font-size: 13px; font-weight: 500; }
+.simple-sub { font-size: 11.5px; color: var(--text-dim); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.check-circle { background: none; border: none; color: var(--text-dim); display: flex; padding: 0; }
+.due-tag { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.due-tag.overdue { color: var(--red); font-weight: 600; }
+
+.badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+
+.person-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; }
+.avatar-dot {
+  width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: #12161C; flex-shrink: 0;
+}
+.avatar-dot.lg { width: 38px; height: 38px; font-size: 15px; color: var(--text); }
+
+.program-flag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.program-flag-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 12px 14px; }
+.pf-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.pf-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.pf-notes { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+
+/* Filter bar */
+.filter-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-bar select { width: auto; }
+
+/* Table */
+.table { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.table-row {
+  display: grid; grid-template-columns: 32px 2.2fr 0.9fr 0.9fr 1.4fr 1fr 0.8fr 70px;
+  gap: 10px; align-items: center; padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.table-row:last-child { border-bottom: none; }
+.table-head { background: var(--surface-2); font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; padding: 9px 14px; }
+.table-row:not(.table-head):hover { background: var(--surface-2); }
+.col-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.dot-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.link-tag { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); }
+
+/* Program list */
+.program-list { display: flex; flex-direction: column; gap: 10px; }
+.program-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.program-card-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; cursor: pointer; }
+.pc-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.pc-title { font-family: var(--font-display); font-weight: 600; font-size: 14.5px; }
+.program-card-body { padding: 0 18px 18px; border-top: 1px solid var(--border); }
+.program-notes { font-size: 12.5px; color: var(--text-dim); margin: 12px 0; }
+.milestone-list { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.milestone-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; }
+.milestone-row:last-child { border-bottom: none; }
+.row-actions { display: flex; gap: 4px; }
+
+/* Customers */
+.customer-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
+.customer-list-col { display: flex; flex-direction: column; gap: 6px; }
+.customer-list-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+.customer-list-item.active { border-color: var(--accent); background: var(--accent-dim); }
+.cl-title { font-weight: 500; font-size: 13px; }
+.stat-mini { background: var(--surface-2); border-radius: 6px; padding: 10px 12px; }
+.interaction-form { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; margin-bottom: 16px; }
+.interaction-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.interaction-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; }
+
+/* Calendar */
+.calendar-layout { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.cal-nav h3 { font-family: var(--font-display); font-size: 15px; margin: 0; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-weekdays { margin-bottom: 4px; }
+.cal-weekday { font-size: 10.5px; color: var(--text-dim); text-align: center; text-transform: uppercase; padding-bottom: 4px; }
+.cal-cell { aspect-ratio: 1; border-radius: 6px; background: var(--surface-2); padding: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; border: 1px solid transparent; }
+.cal-cell.empty { background: transparent; cursor: default; }
+.cal-cell:hover:not(.empty) { border-color: var(--border); }
+.cal-cell.today { border-color: var(--accent); }
+.cal-cell.selected { background: var(--accent-dim); }
+.cal-date { font-family: var(--font-mono); font-size: 12px; }
+.cal-dots { display: flex; gap: 3px; flex-wrap: wrap; margin-top: auto; }
+.cal-dot { width: 6px; height: 6px; border-radius: 50%; }
+.cal-dot-task { background: var(--blue); }
+.cal-dot-customer { background: var(--green); }
+.cal-dot-milestone { background: var(--accent); }
+.legend { display: flex; gap: 14px; margin-top: 14px; font-size: 11.5px; color: var(--text-dim); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.legend-swatch.dashed { border: 1px dashed var(--text-dim); background: transparent; }
+
+/* Gantt */
+.gantt-panel { padding: 18px 0 18px 0; }
+.gantt-scroll { overflow-x: auto; padding: 0 20px; }
+.gantt-scale { position: relative; height: 18px; margin-left: 220px; }
+.gantt-scale-tick { position: absolute; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.gantt-row { display: grid; grid-template-columns: 220px 1fr 260px; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); min-width: 700px; }
+.gantt-row:last-child { border-bottom: none; }
+.gantt-row-label { display: flex; align-items: center; gap: 7px; overflow: hidden; }
+.gantt-task-title { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crit-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+.crit-dot.crit { background: var(--accent); }
+.gantt-track { position: relative; height: 22px; background: linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), var(--border) 100%); }
+.gantt-bar { position: absolute; top: 0; height: 22px; border-radius: 4px; background: var(--blue); display: flex; align-items: center; padding: 0 6px; }
+.gantt-bar.critical { background: var(--accent); }
+.gantt-bar-days { font-family: var(--font-mono); font-size: 10px; color: #0E1218; font-weight: 700; }
+.gantt-float { position: absolute; top: 8px; height: 6px; border-top: 1px dashed var(--text-dim); border-bottom: 1px dashed var(--text-dim); opacity: 0.7; }
+.gantt-meta { display: flex; gap: 10px; align-items: center; font-size: 11px; white-space: nowrap; }
+.crit-text { color: var(--accent); font-weight: 600; }
+
+/* Team */
+.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.team-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.team-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.team-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; background: var(--surface-2); border-radius: 6px; padding: 10px 4px; margin-bottom: 10px; }
+.mini-task-list { list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 4px; }
+.mini-task-list li { padding: 4px 0; border-top: 1px solid var(--border); }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(8,10,14,0.65); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+.modal-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto; }
+.modal-panel.wide { max-width: 620px; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); }
+.modal-header h3 { font-family: var(--font-display); font-size: 15px; margin: 0; }
+.modal-body { padding: 18px 20px 20px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.field-label { font-size: 11.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.chip-select { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); border-radius: 20px; padding: 5px 12px; font-size: 12px; }
+.chip-active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.color-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; }
+.color-swatch.active { border-color: var(--text); }
+
+.milestone-editor { display: flex; flex-direction: column; gap: 8px; }
+.milestone-edit-row { display: grid; grid-template-columns: 1fr 150px auto; gap: 8px; align-items: center; }
+
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 30px 10px; color: var(--text-dim); gap: 6px; }
+.empty-state h4 { font-family: var(--font-display); font-size: 13.5px; color: var(--text); margin: 4px 0 0; }
+.empty-state p { font-size: 12px; margin: 0; max-width: 240px; }
+
+@media (max-width: 900px) {
+  .app-shell { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: relative; flex-direction: row; align-items: center; padding: 12px 16px; overflow-x: auto; }
+  .brand { padding: 0; margin-right: 16px; }
+  .nav { flex-direction: row; }
+  .sidebar-footer { display: none; }
+  .main { padding: 20px; }
+  .dash-grid, .stat-row, .calendar-layout, .customer-layout { grid-template-columns: 1fr; }
+  .table-row { grid-template-columns: 24px 1.5fr 1fr 70px; }
+  .col-md, .col-sm:nth-of-type(3) { display: none; }
+}
+`;
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<OpsCommand />);
+</script>
+</body>
+</html>
